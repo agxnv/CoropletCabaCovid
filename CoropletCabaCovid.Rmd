@@ -1,0 +1,80 @@
+
+
+```{r include=FALSE}
+pacman::p_load(tidyverse, highcharter, readr, sp, httr, dplyr, tidyr, jsonlite, domtools) 
+
+Sys.setlocale("LC_ALL","en_US.UTF-8")  
+```
+
+
+```{r include=FALSE}
+datos_covid <- read_csv(url("https://cdn.buenosaires.gob.ar/datosabiertos/datasets/salud/casos-covid-19/casos_covid19.csv")) 
+datos_covid$fecha_clasificacion <- as.Date(datos_covid$fecha_clasificacion, format = "%d%b%Y:00:00:00.000000")
+```
+
+
+```{r include=FALSE}
+datos_covid <- datos_covid %>%
+  filter(provincia == 'CABA',
+         tipo_contagio == 'Trabajador de la Salud',
+         clasificacion == 'confirmado') %>% 
+  filter(!is.na(barrio)) %>%
+  mutate(seleccion = as.Date(cut(fecha_clasificacion, breaks = "month", right = FALSE))) %>%
+   count(barrio, seleccion) %>%
+ complete(seleccion, nesting(barrio), fill = list(n = 0)) %>%
+ arrange(barrio, seleccion) %>% rename(suma = n) %>% group_by(barrio) %>% mutate(n = cumsum(suma)) %>%
+  ungroup()
+datos_covid <- datos_covid[order(as.Date(datos_covid$seleccion, format="%B %Y")),]
+
+Sys.setlocale("LC_ALL","es_AR.UTF-8")   
+datos_covid$seleccion <- firstup(format(datos_covid$seleccion,"%B %Y"))
+
+
+```
+
+```{r include=FALSE}
+CABAmapjson1 <-"https://cdn.buenosaires.gob.ar/datosabiertos/datasets/barrios/barrios.geojson" %>% 
+  GET() %>% 
+  content() %>% 
+  jsonlite::fromJSON(simplifyVector = FALSE)
+
+secuen <- datos_covid %>% 
+  group_by(barrio) %>% 
+  do(item = list(
+    barrio = first(.$barrio),
+    sequence = .$n,
+    n = first(.$n),
+    value = first(.$n))) %>% 
+  .$item
+
+hc <- highchart(type = "map") %>% 
+  hc_add_series(data = secuen,
+                name = "Casos",
+                mapData = CABAmapjson1,
+                joinBy = "barrio",
+                borderWidth = 0.01,
+                dataLabels = list(enabled = TRUE, format = '{point.barrio}')) %>% 
+  hc_colorAxis(stops = color_stops()) %>%  
+  hc_title(text = "Casos de COVID-19 en trabajadores de la salud") %>%
+  hc_subtitle(text = "Fuente: BA data") %>% 
+  hc_legend(layout = "vertical", reversed = TRUE,
+            floating = TRUE, align = "right") %>% 
+  hc_tooltip(pointFormat = "{point.value} casos.", headerFormat = "") %>% 
+  hc_motion(
+    enabled = TRUE,
+    axisLabel = "month",
+    labels = unique(datos_covid$seleccion),
+    series = 0, autoPlay = TRUE, updateInterval = 10
+    ) %>%
+  hc_mapNavigation(enabled = TRUE) %>%
+  hc_add_theme(hc_theme_ffx()) %>% 
+  hc_chart(borderColor = "#08338F",
+           borderRadius = 10,
+           borderWidth = 2)
+```
+
+```{r}
+
+hc
+
+```
